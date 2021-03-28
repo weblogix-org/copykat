@@ -58,7 +58,7 @@ copykat <- function(rawmat=rawdata, id.type="S", cell.line="no", ngene.chr=5,LOW
 	### module 3 removing genes that are involved in cell cycling
 	HLAs <- anno.mat$hgnc_symbol[grep("^HLA-", anno.mat$hgnc_symbol)]
 	toRev <- which(anno.mat$hgnc_symbol %in% c(as.vector(cyclegenes[[1]]), HLAs))
-	if(length(toRev)>0) {
+	if (length(toRev)>0) {
 		anno.mat <- anno.mat[-toRev, ]
 	}
 
