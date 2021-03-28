@@ -30,8 +30,8 @@ copykat <- function(rawmat=rawdata, id.type="S", cell.line="no", ngene.chr=5,LOW
 	print("step1: read and filter data ...")
 	print(paste(nrow(rawmat), " genes, ", ncol(rawmat), " cells in raw data", sep=""))
 	genes.raw <- apply(rawmat, 2, function(x)(sum(x>0)))
-	if(sum(genes.raw> 200)==0) stop("none cells have more than 200 genes")
-	if(sum(genes.raw<100)>1){
+	if (sum(genes.raw> 200)==0) stop("none cells have more than 200 genes")
+	if (sum(genes.raw<100)>1) {
 		rawmat <- rawmat[, -which(genes.raw< 200)]
 		print(paste("filtered out ", sum(genes.raw<=200), " cells with less than 200 genes; remaining ", ncol(rawmat), " cells", sep=""))
 	}
