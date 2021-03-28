@@ -26,7 +26,7 @@ copykat <- function(rawmat=rawdata, id.type="S", cell.line="no", ngene.chr=5,LOW
   	set.seed(1)
   	sample.name <- paste(sam.name,"_copykat_", sep="")
 
-	print("running copykat v1.0.4")
+	print("running copykat v1.0.5")
 	print("step1: read and filter data ...")
 	print(paste(nrow(rawmat), " genes, ", ncol(rawmat), " cells in raw data", sep=""))
 	genes.raw <- apply(rawmat, 2, function(x)(sum(x>0)))
