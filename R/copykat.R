@@ -293,115 +293,116 @@ copykat <- function(rawmat=rawdata, id.type="S", cell.line="no", ngene.chr=5,LOW
 		names(hc.umap) <- colnames(results.com)
 
 		cl.ID <- NULL
-		for(i in 1:max(hc.umap)){
-		cli <- names(hc.umap)[which(hc.umap==i)]
-		pid <- length(intersect(cli, preN))/length(cli)
-		cl.ID <- c(cl.ID, pid)
-		i<- i+1
+		for(i in 1:max(hc.umap)) {
+			cli <- names(hc.umap)[which(hc.umap==i)]
+			pid <- length(intersect(cli, preN))/length(cli)
+			cl.ID <- c(cl.ID, pid)
+			i<- i+1
+		}
+		com.pred <- names(hc.umap)
+		com.pred[which(hc.umap == which(cl.ID==max(cl.ID)))] <- "diploid"
+		com.pred[which(hc.umap == which(cl.ID==min(cl.ID)))] <- "nondiploid"
+		names(com.pred) <- names(hc.umap)
+
+		################removed baseline adjustment
+		results.com.rat <- uber.mat.adj-apply(uber.mat.adj[,which(com.pred=="diploid")], 1, mean)
+		results.com.rat <- apply(results.com.rat,2,function(x)(x <- x-mean(x)))
+		results.com.rat.norm <- results.com.rat[,which(com.pred=="diploid")]; dim(results.com.rat.norm)
+
+		cf.h <- apply(results.com.rat.norm, 1, sd)
+		base <- apply(results.com.rat.norm, 1, mean)
+
+		adjN <- function(j) {
+			a <- results.com.rat[, j]
+			a[abs(a-base) <= 0.25*cf.h] <- mean(a)
+			a
+		}
+
+		mc.adjN <-  parallel::mclapply(1:ncol(results.com.rat),adjN, mc.cores = n.cores)
+		adj.results <- matrix(unlist(mc.adjN), ncol = ncol(results.com.rat), byrow = FALSE)
+		colnames(adj.results) <- colnames(results.com.rat)
+
+		rang <- 0.5*(max(adj.results)-min(adj.results))
+		mat.adj <- adj.results/rang
+
+		print("step 8: final prediction ...")
+
+		if (distance=="euclidean") {
+			hcc <- hclust(parallelDist::parDist(t(mat.adj),threads =n.cores, method = distance), method = "ward.D")
+		} else {
+			hcc <- hclust(as.dist(1-cor(mat.adj, method = distance)), method = "ward.D")
+		}
+
+		hc.umap <- cutree(hcc,2)
+		names(hc.umap) <- colnames(results.com)
+
+		saveRDS(hcc, file = paste(sample.name,"clustering_results.rds",sep=""))
+
+		cl.ID <- NULL
+		for (i in 1:max(hc.umap)) {
+			cli <- names(hc.umap)[which(hc.umap==i)]
+			pid <- length(intersect(cli, preN))/length(cli)
+			cl.ID <- c(cl.ID, pid)
+			i<- i+1
+		}
+
+		com.preN <- names(hc.umap)
+		com.preN[which(hc.umap == which(cl.ID==max(cl.ID)))] <- "diploid"
+		com.preN[which(hc.umap == which(cl.ID==min(cl.ID)))] <- "aneuploid"
+		names(com.preN) <- names(hc.umap)
+
+		if (WNS=="unclassified.prediction") {
+			com.preN[which(com.preN == "diploid")] <- "c1:diploid:low.conf"
+			com.preN[which(com.preN == "nondiploid")] <- "c2:aneuploid:low.conf"
+		}
+		print("step 9: saving results...")
+		res <- cbind(names(com.preN), com.preN)
+		colnames(res) <- c("cell.names", "copykat.pred")
+		write.table(res, paste(sample.name, "prediction.txt",sep=""), sep="\t", row.names = FALSE, quote = FALSE)
+		####save copycat CNA
+		write.table(cbind(Aj$RNA.adj[, 1:3], mat.adj), paste(sample.name, "CNA_results.txt", sep=""), sep="\t", row.names = FALSE, quote = F)
+		####%%%%%%%%%%%%%%%%%next heatmaps, subpopulations and tSNE overlay
+		print("step 10: ploting heatmap ...")
+		my_palette <- colorRampPalette(rev(RColorBrewer::brewer.pal(n = 3, name = "RdBu")))(n = 999)
+		chr <- as.numeric(Aj$DNA.adj$chrom) %% 2+1
+		rbPal1 <- colorRampPalette(c('black','grey'))
+		CHR <- rbPal1(2)[as.numeric(chr)]
+		chr1 <- cbind(CHR,CHR)
+		rbPal5 <- colorRampPalette(RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1])
+		compreN_pred <- rbPal5(2)[as.numeric(factor(com.preN))]
+		cells <- rbind(compreN_pred,compreN_pred)
+		if (ncol(mat.adj)< 3000){
+			h <- 10
+		} else {
+			h <- 15
+		}
+		col_breaks = c(seq(-1,-0.4,length=50),seq(-0.4,-0.2,length=150),seq(-0.2,0.2,length=600),seq(0.2,0.4,length=150),seq(0.4, 1,length=50))
+
+		if (distance=="euclidean") {
+			jpeg(paste(sample.name,"heatmap.jpeg",sep=""), height=h*250, width=4000, res=100)
+			heatmap.3(t(mat.adj),dendrogram="r", distfun = function(x) parallelDist::parDist(x,threads =n.cores, method = distance), hclustfun = function(x) hclust(x, method="ward.D"),
+				ColSideColors=chr1,RowSideColors=cells,Colv=NA, Rowv=TRUE,
+				notecol="black",col=my_palette,breaks=col_breaks, key=TRUE,
+				keysize=1, density.info="none", trace="none",
+				cexRow=0.1,cexCol=0.1,cex.main=1,cex.lab=0.1,
+				symm=F,symkey=F,symbreaks=T,cex=1, main=paste(WNS1,"; ",WNS, sep=""), cex.main=4, margins=c(10,10))
+			legend("topright", paste("pred.",names(table(com.preN)),sep=""), pch=15,col=RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1], cex=1)
+			dev.off()
+		} else {
+			jpeg(paste(sample.name,"heatmap.jpeg",sep=""), height=h*250, width=4000, res=100)
+			heatmap.3(t(mat.adj),dendrogram="r", distfun = function(x) as.dist(1-cor(t(x), method = distance)), hclustfun = function(x) hclust(x, method="ward.D"),
+				ColSideColors=chr1,RowSideColors=cells,Colv=NA, Rowv=TRUE,
+				notecol="black",col=my_palette,breaks=col_breaks, key=TRUE,
+				keysize=1, density.info="none", trace="none",
+				cexRow=0.1,cexCol=0.1,cex.main=1,cex.lab=0.1,
+				symm=F,symkey=F,symbreaks=T,cex=1, main=paste(WNS1,"; ",WNS, sep=""), cex.main=4, margins=c(10,10))
+			legend("topright", paste("pred.",names(table(com.preN)),sep=""), pch=15,col=RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1], cex=1)
+			dev.off()
+		}
+		end_time<- Sys.time()
+		print(end_time -start_time)
+		reslts <- list(res, cbind(Aj$RNA.adj[, 1:3], mat.adj), hcc)
+		names(reslts) <- c("prediction", "CNAmat","hclustering")
+		return(reslts)
 	}
-	com.pred <- names(hc.umap)
-	com.pred[which(hc.umap == which(cl.ID==max(cl.ID)))] <- "diploid"
-	com.pred[which(hc.umap == which(cl.ID==min(cl.ID)))] <- "nondiploid"
-	names(com.pred) <- names(hc.umap)
-
-	################removed baseline adjustment
-	results.com.rat <- uber.mat.adj-apply(uber.mat.adj[,which(com.pred=="diploid")], 1, mean)
-	results.com.rat <- apply(results.com.rat,2,function(x)(x <- x-mean(x)))
-	results.com.rat.norm <- results.com.rat[,which(com.pred=="diploid")]; dim(results.com.rat.norm)
-
-	cf.h <- apply(results.com.rat.norm, 1, sd)
-	base <- apply(results.com.rat.norm, 1, mean)
-
-	adjN <- function(j) {
-		a <- results.com.rat[, j]
-		a[abs(a-base) <= 0.25*cf.h] <- mean(a)
-		a
-	}
-
-	mc.adjN <-  parallel::mclapply(1:ncol(results.com.rat),adjN, mc.cores = n.cores)
-	adj.results <- matrix(unlist(mc.adjN), ncol = ncol(results.com.rat), byrow = FALSE)
-	colnames(adj.results) <- colnames(results.com.rat)
-
-	rang <- 0.5*(max(adj.results)-min(adj.results))
-	mat.adj <- adj.results/rang
-
-	print("step 8: final prediction ...")
-
-	if (distance=="euclidean") {
-		hcc <- hclust(parallelDist::parDist(t(mat.adj),threads =n.cores, method = distance), method = "ward.D")
-	} else {
-		hcc <- hclust(as.dist(1-cor(mat.adj, method = distance)), method = "ward.D")
-	}
-
-	hc.umap <- cutree(hcc,2)
-	names(hc.umap) <- colnames(results.com)
-
-	saveRDS(hcc, file = paste(sample.name,"clustering_results.rds",sep=""))
-
-	cl.ID <- NULL
-	for (i in 1:max(hc.umap)) {
-		cli <- names(hc.umap)[which(hc.umap==i)]
-		pid <- length(intersect(cli, preN))/length(cli)
-		cl.ID <- c(cl.ID, pid)
-		i<- i+1
-	}
-
-	com.preN <- names(hc.umap)
-	com.preN[which(hc.umap == which(cl.ID==max(cl.ID)))] <- "diploid"
-	com.preN[which(hc.umap == which(cl.ID==min(cl.ID)))] <- "aneuploid"
-	names(com.preN) <- names(hc.umap)
-
-	if (WNS=="unclassified.prediction") {
-		com.preN[which(com.preN == "diploid")] <- "c1:diploid:low.conf"
-		com.preN[which(com.preN == "nondiploid")] <- "c2:aneuploid:low.conf"
-	}
-	print("step 9: saving results...")
-	res <- cbind(names(com.preN), com.preN)
-	colnames(res) <- c("cell.names", "copykat.pred")
-	write.table(res, paste(sample.name, "prediction.txt",sep=""), sep="\t", row.names = FALSE, quote = FALSE)
-	####save copycat CNA
-	write.table(cbind(Aj$RNA.adj[, 1:3], mat.adj), paste(sample.name, "CNA_results.txt", sep=""), sep="\t", row.names = FALSE, quote = F)
-	####%%%%%%%%%%%%%%%%%next heatmaps, subpopulations and tSNE overlay
-	print("step 10: ploting heatmap ...")
-	my_palette <- colorRampPalette(rev(RColorBrewer::brewer.pal(n = 3, name = "RdBu")))(n = 999)
-	chr <- as.numeric(Aj$DNA.adj$chrom) %% 2+1
-	rbPal1 <- colorRampPalette(c('black','grey'))
-	CHR <- rbPal1(2)[as.numeric(chr)]
-	chr1 <- cbind(CHR,CHR)
-	rbPal5 <- colorRampPalette(RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1])
-	compreN_pred <- rbPal5(2)[as.numeric(factor(com.preN))]
-	cells <- rbind(compreN_pred,compreN_pred)
-	if (ncol(mat.adj)< 3000){
-		h <- 10
-	} else {
-		h <- 15
-	}
-	col_breaks = c(seq(-1,-0.4,length=50),seq(-0.4,-0.2,length=150),seq(-0.2,0.2,length=600),seq(0.2,0.4,length=150),seq(0.4, 1,length=50))
-
-	if (distance=="euclidean") {
-	 	jpeg(paste(sample.name,"heatmap.jpeg",sep=""), height=h*250, width=4000, res=100)
-	   	heatmap.3(t(mat.adj),dendrogram="r", distfun = function(x) parallelDist::parDist(x,threads =n.cores, method = distance), hclustfun = function(x) hclust(x, method="ward.D"),
-			ColSideColors=chr1,RowSideColors=cells,Colv=NA, Rowv=TRUE,
-			notecol="black",col=my_palette,breaks=col_breaks, key=TRUE,
-			keysize=1, density.info="none", trace="none",
-			cexRow=0.1,cexCol=0.1,cex.main=1,cex.lab=0.1,
-			symm=F,symkey=F,symbreaks=T,cex=1, main=paste(WNS1,"; ",WNS, sep=""), cex.main=4, margins=c(10,10))
-		legend("topright", paste("pred.",names(table(com.preN)),sep=""), pch=15,col=RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1], cex=1)
-		dev.off()
-	} else {
-		jpeg(paste(sample.name,"heatmap.jpeg",sep=""), height=h*250, width=4000, res=100)
-		heatmap.3(t(mat.adj),dendrogram="r", distfun = function(x) as.dist(1-cor(t(x), method = distance)), hclustfun = function(x) hclust(x, method="ward.D"),
-			ColSideColors=chr1,RowSideColors=cells,Colv=NA, Rowv=TRUE,
-			notecol="black",col=my_palette,breaks=col_breaks, key=TRUE,
-			keysize=1, density.info="none", trace="none",
-			cexRow=0.1,cexCol=0.1,cex.main=1,cex.lab=0.1,
-			symm=F,symkey=F,symbreaks=T,cex=1, main=paste(WNS1,"; ",WNS, sep=""), cex.main=4, margins=c(10,10))
-		legend("topright", paste("pred.",names(table(com.preN)),sep=""), pch=15,col=RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1], cex=1)
-		dev.off()
-	}
-	end_time<- Sys.time()
-	print(end_time -start_time)
-	reslts <- list(res, cbind(Aj$RNA.adj[, 1:3], mat.adj), hcc)
-	names(reslts) <- c("prediction", "CNAmat","hclustering")
-	return(reslts)
 }
